@@ -24,7 +24,7 @@ SD_SCK           GPIO14
 
 
 
-Available: GPIO 2,0,16,17,21,3,1,22   12,32,39,36  (34-39 - input only, no pullup)
+Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 )
 */
 
@@ -169,7 +169,7 @@ void checkSwitches(){
         raw=encoder.getCountRaw();
         encoder.clearCount();
         encoder.setCount(tmp-raw);
-        BUZZER_ACTIVE=0;
+        drawBuzzer(0);
       }else{
         encoder.setCount(0);
       }    
@@ -182,12 +182,18 @@ void checkSwitches(){
         AbsInc();
     }
   }
-    if(digitalRead(BUZZER_PIN)==LOW){
-      //if(debounce(BUZZER_PIN)==1){
-        
-      //}
+  if(digitalRead(BUZZER_IN_PIN)==LOW){
+    if(debounce(BUZZER_IN_PIN)==1){
+      if(BUZZER_ACTIVE>0){
+        drawBuzzer(0);
+      }else{
+        drawBuzzer(2);
+        BUZZER_COUNT=encoder.getCountRaw();
+        BUZZER_PREV=BUZZER_COUNT;
+      }
+      drawBuzzer(BUZZER_ACTIVE);
+    }
   }
-  
 } 
 
 void AbsInc(){
@@ -208,26 +214,53 @@ String checkKeyboard(){
   value=DroKeyList->checkKeys();
   if(value != '\0'){
     switch(value){
-
       case 'S':
         displaySetup();
         initDRODisplay();
       break;
-      }
-      
+      }      
   }
   return(result);
 }
 
-void setBuzzer(){
-  BUZZER_COUNT=encoder.getCountRaw();
+void drawBuzzer(int flag){
+  BUZZER_ACTIVE=flag;
+  Tft->setTextSize(DRO_SCALE);
+  Tft->fillRect(0,ROW[5], Tft->w, DRO_H,ILI9341_BLACK);
+  switch(flag){
+    case 1:
+      Tft->setTextColor(ILI9341_GREEN);
+      Tft->setCursor(0,ROW[5]);Tft->print("BUZZER");
+    break;
+    case 2:
+      Tft->setTextColor(ILI9341_RED);
+      Tft->setCursor(0,ROW[5]);Tft->print("BUZZER");
+    break;
+    default:
+    break;
+  }    
 }
 
 void checkBuzzer(){
-  if(BUZZER_ACTIVE==1){
-    if(encoder.getCountRaw() < BUZZER_COUNT){
-      // buzz for 1 second
+  int32_t currentCnt;
+
+  if(BUZZER_ACTIVE != 0){
+    currentCnt=encoder.getCountRaw();
+
+    // if current has moved outside limit, enable buzzer(1)
+    if(BUZZER_ACTIVE==2 && abs(currentCnt-BUZZER_COUNT)>BUZZER_LIMIT){
+      drawBuzzer(1);
     }
+  
+    // if current hits BUZZER_COUNT 
+    if(BUZZER_ACTIVE==1){
+      if((currentCnt < BUZZER_PREV && currentCnt<=BUZZER_COUNT) ||  // moving left
+         (currentCnt > BUZZER_PREV && currentCnt>=BUZZER_COUNT)){   // moving right
+        // buzz for 1 second
+        drawBuzzer(2);
+      }
+    }   
+    BUZZER_PREV=currentCnt;
   }
 }
 
@@ -252,8 +285,9 @@ void setup() {
    
   pinMode(ZERO_PIN, INPUT_PULLUP);
   pinMode(INC_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_PIN, INPUT_PULLUP);
-
+  pinMode(BUZZER_IN_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_OUT_PIN, OUTPUT);
+ 
   Tft= new TFT_CLASS(SD_ENABLE,1); // Set  SD card=off/on  and initial rotation to 1
   //Tft->calibrate();
   
@@ -269,8 +303,7 @@ void setup() {
   SetupKeyList->addButton(159,ROW[6]-1,319,ROW[6]+DRO_H+1,"Apply",'A');
   AbsInc();
 
-  initDRODisplay();
-  
+  initDRODisplay(); 
 }
 
 void loop(){
@@ -287,4 +320,5 @@ void loop(){
   }
   checkSwitches();
   checkKeyboard();
+  checkBuzzer();
 }

@@ -14,7 +14,8 @@
 #define B_PIN 17  // WHITE
 #define INC_PIN 21
 #define ZERO_PIN 22
-#define BUZZER_PIN 1
+#define BUZZER_IN_PIN 2
+#define BUZZER_OUT_PIN 12
 
 #define DEBOUNCE_TIME 500
 
@@ -34,9 +35,11 @@ int ROW[]={1,35,69,103,137,171,205};
 int SWAPX = 1;
 int SWAPY= 1;
 int STEPS = 1200;
-int BUZZER_COUNT=0;
-int BUZZER_ACTIVE=0;
 
+#define BUZZER_LIMIT 120
+int32_t BUZZER_COUNT=0;
+int BUZZER_ACTIVE=0;
+int32_t BUZZER_PREV=0;
 
 void displayDRO(int resetDisplay=0);
 
