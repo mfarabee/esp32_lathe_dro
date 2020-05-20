@@ -28,8 +28,12 @@
 #define DRO_DIGITS 10
 #define DRO_STARTX 48
 
-#define EEPROM_SIZE 3
+int EEPROM_SIZE=0;
+int EEPROM_VALID_ADDR =0;
+int EEPROM_DIR_ADDR =1;
+int EEPROM_SCALE_ADDR=3;
 int EEPROM_WORKING =0;
+
 
 int ROW[]={1,35,69,103,137,171,205};
 int SWAPX = 1;
@@ -42,5 +46,7 @@ int BUZZER_ACTIVE=0;
 int32_t BUZZER_PREV=0;
 
 void displayDRO(int resetDisplay=0);
+
+
 
 #endif

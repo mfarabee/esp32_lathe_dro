@@ -34,7 +34,7 @@ Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 #include "tftDisplay.h"
 #include "tftSD.h"
 #include "keyboard.h"
-#include <EEPROM.h>
+#include <EEPROM.h>  //https://github.com/espressif/arduino-esp32/tree/master/libraries/EEPROM
 
 TFT_CLASS *Tft;
 ESP32Encoder encoder;
@@ -99,6 +99,11 @@ void displaySetup(){
   if(value == 'A'){
     SWAPX=swap;
     STEPS=stepCnt;
+    if(EEPROM_WORKING == 1){
+      EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
+      EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
+      Serial.println("writing to EEPROM");
+    }
   }
 }
 
@@ -276,9 +281,22 @@ void setup() {
 
   pinMode(A_PIN, INPUT_PULLUP);
   pinMode(B_PIN, INPUT_PULLUP);
-
+  
+  EEPROM_DIR_ADDR=EEPROM_VALID_ADDR+sizeof(char);
+  EEPROM_SCALE_ADDR=EEPROM_DIR_ADDR+sizeof(int);
+  EEPROM_SIZE= sizeof(char)+sizeof(int)+sizeof(int);
   if(EEPROM.begin(EEPROM_SIZE)){
-    EEPROM_WORKING=1;
+    if(EEPROM.readChar(EEPROM_VALID_ADDR) == 'X'){ //Valid data exists
+      SWAPX=EEPROM.readInt(EEPROM_DIR_ADDR);
+      STEPS=EEPROM.readInt(EEPROM_SCALE_ADDR);
+    }else{ // First time, so initalize
+      Serial.println("inital writing to EEPROM");
+      EEPROM.writeChar(EEPROM_VALID_ADDR,'X');
+      EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
+      EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
+      
+    }
+    EEPROM_WORKING=1;  
   }
   
   encoder.clearCount();
