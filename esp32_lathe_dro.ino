@@ -28,7 +28,6 @@ Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 )
 */
 
-
 #include <ESP32Encoder.h> // https://github.com/madhephaestus/ESP32Encoder/
 #include "esp32_lathe_dro.h"
 #include "tftDisplay.h"
@@ -38,9 +37,27 @@ Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 
 TFT_CLASS *Tft;
 ESP32Encoder encoder;
-int32_t counterOffset=0;
+int CounterMultiplier=0;
 KEYLIST_CLASS *DroKeyList,*SetupKeyList;
 int Absolute=1;
+
+
+// The encoder roll roll to zero and continue in positive or negative direction  
+// -> 0,1,32766,0,1,...    
+// -> 0,-1,-32767,0,-1,...
+int64_t CounterOffset(int mult){
+  int64_t result;
+  if (mult==0){
+    result=0;
+  }else if(mult > 0){
+    result=mult*32767;
+  }else{
+    result=mult*32768;
+  }
+  return(result);
+}
+
+
 
 void initDRODisplay(){
   Tft->fillScreen(ILI9341_BLACK);
@@ -49,11 +66,7 @@ void initDRODisplay(){
   Tft->fillRect(0,ROW[6], Tft->w, DRO_H,ILI9341_BLUE);
   Tft->setTextColor(ILI9341_WHITE); Tft->setCursor(80,ROW[6]);
   Tft->print("Setup");
-  if(Absolute >0){
-      displayDRO(encoder.getCountRaw(),1);
-  }else{
-      displayDRO(encoder.getCount(),1);
-  }
+  displayDRO(1);
 }
 
 void displaySetup(){
@@ -70,7 +83,6 @@ void displaySetup(){
   Tft->setTextSize(DRO_SCALE);
   Tft->setCursor(100,ROW[1]);Tft->print(swap);
   Tft->setCursor(100,ROW[3]);Tft->print(stepCnt);
-
   
   value=SetupKeyList->checkKeys();
   while (value != 'A' && value !='C'){
@@ -96,32 +108,40 @@ void displaySetup(){
     }
     value=SetupKeyList->checkKeys();
   }
-  if(value == 'A'){
+  if(value == 'A'){ // Apply settings and save to EEPROM
     SWAPX=swap;
     STEPS=stepCnt;
     if(EEPROM_WORKING == 1){
       EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
       EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
+      EEPROM.commit();
       Serial.println("writing to EEPROM");
     }
   }
 }
 
 // Displays Coordinates
-void displayDRO(int32_t countX,int resetDisplay){
+void displayDRO(int resetDisplay){
+  int64_t countX;
   char tmp[100];
-  float cXin,cXmm;
+  double cXin,cXmm;
   static char prevXmm[20]="",prevXin[20]="";
   /*
    *         ABS/INC
-   * X     1234.1234
-   * Y     1234.1234
+   *      1234.1234 mm
+   *      1234.1234 in
    */
 
-   cXmm=SWAPX*40.0*countX/(float)STEPS;
-
-   cXin=cXmm/25.4;
+  if(Absolute >0){
+    countX=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
+  }else{
+    countX=encoder.getCount()+CounterOffset(CounterMultiplier);
+  }
    
+
+   cXmm=SWAPX*40.0*(countX/(double)STEPS);
+   cXin=cXmm/25.4;
+
   Tft->setTextSize(DRO_SCALE);
   if(resetDisplay==1){
      strcpy(prevXmm,"");strcpy(prevXin,"");
@@ -129,14 +149,15 @@ void displayDRO(int32_t countX,int resetDisplay){
      Tft->fillRect(DRO_STARTX,ROW[3],DRO_DIGITS*DRO_W, DRO_H,ILI9341_BLACK);
   }
 
-
-  sprintf(tmp,"%-5.4f mm",(float)cXmm); 
+  sprintf(tmp,"%-5.4f mm",cXmm); 
   if(strcmp(tmp,prevXmm)!=0){ // Only print if different
+    // draw old value on background (erase), then draw new value (reduces screen flash)
     Tft->setTextColor(ILI9341_BLACK); Tft->setCursor(DRO_STARTX+(DRO_W*(DRO_DIGITS-strlen(prevXmm))),ROW[2]); Tft->print(prevXmm);
     Tft->setTextColor(ILI9341_YELLOW); Tft->setCursor(DRO_STARTX+(DRO_W*(DRO_DIGITS-strlen(tmp))),ROW[2]); Tft->print(tmp);
     strcpy(prevXmm,tmp);
-        
-    sprintf(tmp,"%-5.4f in",(float)cXin); 
+
+    sprintf(tmp,"%-5.4f in",cXin); 
+    //sprintf(tmp,"%d raw",raw);  // debug
     Tft->setTextColor(ILI9341_BLACK); Tft->setCursor(DRO_STARTX+(DRO_W*(DRO_DIGITS-strlen(prevXin))),ROW[4]); Tft->print(prevXin);
     Tft->setTextColor(ILI9341_YELLOW); Tft->setCursor(DRO_STARTX+(DRO_W*(DRO_DIGITS-strlen(tmp))),ROW[4]); Tft->print(tmp);
     strcpy(prevXin,tmp);
@@ -150,18 +171,18 @@ int debounce(int pinNum){
   
   if(debounce[pinNum] == 0L){
     debounce[pinNum]=millis();
-    Serial.println("set");         
+    //Serial.println("set");         
   }else {
     debounceTime=(millis()- debounce[pinNum]);
     if(debounceTime < DEBOUNCE_TIME){
-      Serial.print(debounceTime);Serial.print("   ");Serial.println("fail"); 
+      //Serial.print(debounceTime);Serial.print("   ");Serial.println("fail"); 
       result=0;
     }else{
       debounce[pinNum]=millis();
-      Serial.println("set2"); 
+      //Serial.println("set2"); 
     }
   }
-  Serial.print(pinNum);Serial.print("  ");Serial.println(debounce[pinNum]);
+  //Serial.print(pinNum);Serial.print("  ");Serial.println(debounce[pinNum]);
   return(result);
 }
 
@@ -174,7 +195,7 @@ void checkSwitches(){
         raw=encoder.getCountRaw();
         encoder.clearCount();
         encoder.setCount(tmp-raw);
-        drawBuzzer(0);
+        drawBuzzer(BUZZER_OFF);
       }else{
         encoder.setCount(0);
       }    
@@ -183,20 +204,18 @@ void checkSwitches(){
   if(digitalRead(INC_PIN)==LOW){
     if(debounce(INC_PIN)==1){
         Absolute *= -1;
-        Serial.println(Absolute);
+        //Serial.println(Absolute);
         AbsInc();
     }
   }
   if(digitalRead(BUZZER_IN_PIN)==LOW){
     if(debounce(BUZZER_IN_PIN)==1){
-      if(BUZZER_ACTIVE>0){
-        drawBuzzer(0);
+      if(BUZZER_STATE != BUZZER_OFF){
+        drawBuzzer(BUZZER_OFF);
       }else{
-        drawBuzzer(2);
-        BUZZER_COUNT=encoder.getCountRaw();
-        BUZZER_PREV=BUZZER_COUNT;
+        BUZZER_COUNT=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
+        drawBuzzer(BUZZER_WAIT_FOR_RESET);
       }
-      drawBuzzer(BUZZER_ACTIVE);
     }
   }
 } 
@@ -229,43 +248,61 @@ String checkKeyboard(){
 }
 
 void drawBuzzer(int flag){
-  BUZZER_ACTIVE=flag;
-  Tft->setTextSize(DRO_SCALE);
+  double cXmm;
+  char tmp[100];
+  
+  BUZZER_STATE=flag;
+  Tft->setTextSize(DRO_SCALE-1);
   Tft->fillRect(0,ROW[5], Tft->w, DRO_H,ILI9341_BLACK);
+  
+   cXmm=SWAPX*40.0*(BUZZER_COUNT/(double)STEPS);
+   sprintf(tmp,"Buzz:%-5.4fmm",cXmm);
   switch(flag){
-    case 1:
+    case BUZZER_READY: // buzzer active
       Tft->setTextColor(ILI9341_GREEN);
-      Tft->setCursor(0,ROW[5]);Tft->print("BUZZER");
+      Tft->setCursor(0,ROW[5]);Tft->print(tmp);
     break;
-    case 2:
+    case BUZZER_WAIT_FOR_RESET: // buzzer waiting to reset
       Tft->setTextColor(ILI9341_RED);
-      Tft->setCursor(0,ROW[5]);Tft->print("BUZZER");
+      Tft->setCursor(0,ROW[5]);Tft->print(tmp);
     break;
     default:
     break;
   }    
 }
 
+// Buzzer is active LOW
 void checkBuzzer(){
-  int32_t currentCnt;
+  static int BuzzDirection=0;
+  int64_t currentCnt;
 
-  if(BUZZER_ACTIVE != 0){
-    currentCnt=encoder.getCountRaw();
+  if(BUZZER_STATE != BUZZER_OFF){
+    currentCnt=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
 
-    // if current has moved outside limit, enable buzzer(1)
-    if(BUZZER_ACTIVE==2 && abs(currentCnt-BUZZER_COUNT)>BUZZER_LIMIT){
-      drawBuzzer(1);
-    }
-  
     // if current hits BUZZER_COUNT 
-    if(BUZZER_ACTIVE==1){
-      if((currentCnt < BUZZER_PREV && currentCnt<=BUZZER_COUNT) ||  // moving left
-         (currentCnt > BUZZER_PREV && currentCnt>=BUZZER_COUNT)){   // moving right
-        // buzz for 1 second
-        drawBuzzer(2);
+    if(BUZZER_STATE==BUZZER_READY){
+      if((BuzzDirection == -1 && currentCnt <= BUZZER_COUNT) ||  // moving to small value
+         (BuzzDirection == 1  && currentCnt >= BUZZER_COUNT)){   // moving to larger value
+          displayDRO(0); // Need to do this so display matched beep value 
+          digitalWrite(BUZZER_OUT_PIN,LOW);
+          delay(BUZZER_TIME);
+          digitalWrite(BUZZER_OUT_PIN,HIGH);
+          drawBuzzer(BUZZER_WAIT_FOR_RESET);
+      }
+    }
+    //  Serial.print((int32_t)abs(currentCnt-BUZZER_COUNT));
+    //  Serial.print("  ");Serial.println((int32_t)BUZZER_LIMIT);
+      
+    // if current has moved outside limit, enable buzzer(1)
+    if( (BUZZER_STATE==BUZZER_WAIT_FOR_RESET) && (abs(currentCnt-BUZZER_COUNT)>BUZZER_LIMIT)){
+      drawBuzzer(BUZZER_READY);
+      if(currentCnt>BUZZER_COUNT){
+        BuzzDirection= -1;
+      }else{
+        BuzzDirection=1;
       }
     }   
-    BUZZER_PREV=currentCnt;
+    
   }
 }
 
@@ -275,10 +312,30 @@ void setup() {
 
   Serial.begin(115200);
   ESP32Encoder::useInternalWeakPullResistors=false;
-  
-  encoder.attachHalfQuad(A_PIN, B_PIN); //1200
-  //encoder.attachFullQuad(A_PIN, B_PIN); //2400
 
+  pinMode(ZERO_PIN, INPUT_PULLUP);
+  pinMode(INC_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_IN_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_OUT_PIN, OUTPUT);
+  digitalWrite(BUZZER_OUT_PIN,HIGH); // turn off buzzer
+  
+
+  switch(ENCODER_TYPE){
+    case 'S':
+      encoder.attachSingleEdge(A_PIN, B_PIN);
+      STEPS=600;
+    break;
+    case 'H':
+      encoder.attachHalfQuad(A_PIN, B_PIN);
+      STEPS=1200;
+    break;
+    case 'F':
+    default:
+      encoder.attachFullQuad(A_PIN, B_PIN);
+      STEPS=2400;
+    break;
+  }
+  // Need to define (redefine) encoder pins after attach, to redefine them as pullups not pulldowns
   pinMode(A_PIN, INPUT_PULLUP);
   pinMode(B_PIN, INPUT_PULLUP);
   
@@ -286,31 +343,26 @@ void setup() {
   EEPROM_SCALE_ADDR=EEPROM_DIR_ADDR+sizeof(int);
   EEPROM_SIZE= sizeof(char)+sizeof(int)+sizeof(int);
   if(EEPROM.begin(EEPROM_SIZE)){
-    if(EEPROM.readChar(EEPROM_VALID_ADDR) == 'X'){ //Valid data exists
+    if(EEPROM.readChar(EEPROM_VALID_ADDR) == ENCODER_TYPE){ //Valid data exists
+      Serial.println("reading from EEPROM");
       SWAPX=EEPROM.readInt(EEPROM_DIR_ADDR);
       STEPS=EEPROM.readInt(EEPROM_SCALE_ADDR);
     }else{ // First time, so initalize
       Serial.println("inital writing to EEPROM");
-      EEPROM.writeChar(EEPROM_VALID_ADDR,'X');
+      EEPROM.writeChar(EEPROM_VALID_ADDR,ENCODER_TYPE);
       EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
       EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
-      
+      EEPROM.commit();     
     }
     EEPROM_WORKING=1;  
   }
   
   encoder.clearCount();
-   
-  pinMode(ZERO_PIN, INPUT_PULLUP);
-  pinMode(INC_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_IN_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_OUT_PIN, OUTPUT);
- 
+
   Tft= new TFT_CLASS(SD_ENABLE,1); // Set  SD card=off/on  and initial rotation to 1
   //Tft->calibrate();
   
   DroKeyList = new KEYLIST_CLASS(Tft);
-  //DroKeyList->addArea(0,ROW[0]-1,Tft->w,ROW[0]+DRO_H+1,'A');
   DroKeyList->addArea(0,ROW[6]-1,Tft->w,ROW[6]+DRO_H+1,'S');
 
   SetupKeyList = new KEYLIST_CLASS(Tft);
@@ -319,22 +371,27 @@ void setup() {
   SetupKeyList->addButton(240,ROW[3]-1,319,ROW[3]+DRO_H+1,"+",'+');
   SetupKeyList->addButton(0,ROW[6]-1,159,ROW[6]+DRO_H+1,"Cancel",'C');
   SetupKeyList->addButton(159,ROW[6]-1,319,ROW[6]+DRO_H+1,"Apply",'A');
-  AbsInc();
 
+  AbsInc();
+  BUZZER_LIMIT=STEPS/3;  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle ratation.
   initDRODisplay(); 
 }
 
 void loop(){
-
   static unsigned long counter=0;
-
+  static int32_t prevCount=0;
+  int32_t raw=0;
   if(millis()-counter >DRO_INTERVAL){
-    if(Absolute >0){
-      displayDRO(encoder.getCountRaw(),0);
-    }else{
-      displayDRO(encoder.getCount(),0);
-    }
+    raw=encoder.getCountRaw();
+    // 30000 and 2000 are arbitrary, bracketing the rollover
+    if (prevCount >30000 && raw <=2000){ // counter (overflow) rolled  from 32766 to 0
+      CounterMultiplier += 1;
+    } else if(prevCount < -30000 && raw >= -2000){  // counter (overflow) rolled  from -32767 to 0
+      CounterMultiplier -=1;
+    }    
+    displayDRO(0);
     counter=millis();
+    prevCount=raw;
   }
   checkSwitches();
   checkKeyboard();

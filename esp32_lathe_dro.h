@@ -2,9 +2,8 @@
 #define ESP32_LATHE_DRO_H
 
 
-//DRO_INTERVAL is how often the display is updated (send '?' to controller)
-//It is recommended that you do not send a command faster than about 200ms (5 hz)
-#define DRO_INTERVAL 200
+//DRO_INTERVAL is how often the display is updated 
+#define DRO_INTERVAL 100
 
 // This is for the local SD card on the TFT. Not currently being used by this program
 // Enable of SD card, enable=1, disable=0
@@ -15,7 +14,7 @@
 #define INC_PIN 21
 #define ZERO_PIN 22
 #define BUZZER_IN_PIN 2
-#define BUZZER_OUT_PIN 12
+#define BUZZER_OUT_PIN 32
 
 #define DEBOUNCE_TIME 500
 
@@ -37,13 +36,18 @@ int EEPROM_WORKING =0;
 
 int ROW[]={1,35,69,103,137,171,205};
 int SWAPX = 1;
-int SWAPY= 1;
-int STEPS = 1200;
+int STEPS = 2400;
+// ENCODER TYPE F=FULL(2400), H=HALF(1200), S+SINGLE(600)
+char ENCODER_TYPE = 'F';
 
-#define BUZZER_LIMIT 120
-int32_t BUZZER_COUNT=0;
-int BUZZER_ACTIVE=0;
-int32_t BUZZER_PREV=0;
+#define BUZZER_TIME 500
+#define BUZZER_OFF 0
+#define BUZZER_READY 1
+#define BUZZER_WAIT_FOR_RESET 2
+int64_t BUZZER_LIMIT= 800;
+int64_t BUZZER_COUNT=0;
+int     BUZZER_STATE=0;
+
 
 void displayDRO(int resetDisplay=0);
 
