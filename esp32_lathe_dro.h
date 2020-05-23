@@ -16,6 +16,9 @@
 #define BUZZER_IN_PIN 2
 #define BUZZER_OUT_PIN 32
 
+#define ABSOLUTE 1
+#define INCREMENTAL -1
+
 #define DEBOUNCE_TIME 500
 
 // DRO DISPLAY LAYOUT

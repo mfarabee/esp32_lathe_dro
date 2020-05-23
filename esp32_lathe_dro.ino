@@ -38,11 +38,12 @@ Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 TFT_CLASS *Tft;
 ESP32Encoder encoder;
 int CounterMultiplier=0;
+int64_t IncrementalOffset=0;
 KEYLIST_CLASS *DroKeyList,*SetupKeyList;
-int Absolute=1;
+int ABSINC_MODE=ABSOLUTE;
 
 
-// The encoder roll roll to zero and continue in positive or negative direction  
+// The encoder will rollover to zero and continue in positive or negative direction  
 // -> 0,1,32766,0,1,...    
 // -> 0,-1,-32767,0,-1,...
 int64_t CounterOffset(int mult){
@@ -57,18 +58,24 @@ int64_t CounterOffset(int mult){
   return(result);
 }
 
-
-
+/*
+ * initDRODisplay
+ * initialize DRO 
+ */
 void initDRODisplay(){
   Tft->fillScreen(ILI9341_BLACK);
   DroKeyList->drawKeys();
-  AbsInc();
+  drawAbsInc();
   Tft->fillRect(0,ROW[6], Tft->w, DRO_H,ILI9341_BLUE);
   Tft->setTextColor(ILI9341_WHITE); Tft->setCursor(80,ROW[6]);
   Tft->print("Setup");
   displayDRO(1);
 }
 
+/*
+ * dislaySetup
+ * Description: Creates.setup screen
+ */
 void displaySetup(){
   int32_t stepCnt;
   int swap;
@@ -89,17 +96,17 @@ void displaySetup(){
     if(value != '\0'){
       Tft->setTextSize(DRO_SCALE);
       switch(value){
-        case 'R':
+        case 'R':  // reverse direction of scale
           swap *= -1;
           Tft->fillRect(100,ROW[1],Tft->w-100,DRO_H,ILI9341_BLACK);
           Tft->setCursor(100,ROW[1]); Tft->print(swap);
         break;
-        case '-':
+        case '-':  // decrease multiplier count
         stepCnt -= 1;
         Tft->fillRect(100,ROW[3],140,DRO_H,ILI9341_BLACK);
         Tft->setCursor(100,ROW[3]); Tft->print(stepCnt);
         break;
-        case '+':
+        case '+':  // increase multiplier count
         stepCnt += 1;
         Tft->fillRect(100,ROW[3],140,DRO_H,ILI9341_BLACK);
         Tft->setCursor(100,ROW[3]); Tft->print(stepCnt);
@@ -120,6 +127,26 @@ void displaySetup(){
   }
 }
 
+int64_t getMyCount(int force=0){
+  int64_t result;
+  static int32_t prevCount=0;
+  int32_t raw=0;
+  
+  raw=encoder.getCountRaw();
+  // 30000 and 2000 are arbitrary, bracketing the rollover
+  if (prevCount >30000 && raw <=2000){ // counter (overflow) rolled  from 32766 to 0
+    CounterMultiplier += 1;
+  } else if(prevCount < -30000 && raw >= -2000){  // counter (overflow) rolled  from -32767 to 0
+    CounterMultiplier -=1;
+  }
+  prevCount=raw;  
+  result=raw+CounterOffset(CounterMultiplier);
+  if(force != 1 && ABSINC_MODE == INCREMENTAL){
+    result += IncrementalOffset;
+  }
+  return(result);
+}
+
 // Displays Coordinates
 void displayDRO(int resetDisplay){
   int64_t countX;
@@ -132,13 +159,7 @@ void displayDRO(int resetDisplay){
    *      1234.1234 in
    */
 
-  if(Absolute >0){
-    countX=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
-  }else{
-    countX=encoder.getCount()+CounterOffset(CounterMultiplier);
-  }
-   
-
+   countX=getMyCount();
    cXmm=SWAPX*40.0*(countX/(double)STEPS);
    cXin=cXmm/25.4;
 
@@ -187,25 +208,24 @@ int debounce(int pinNum){
 }
 
 void checkSwitches(){
-  int32_t tmp,raw;
   if(digitalRead(ZERO_PIN)==LOW){
     if(debounce(ZERO_PIN)==1){
-      if(Absolute>0){
-        tmp=encoder.getCount();
-        raw=encoder.getCountRaw();
+      if(ABSINC_MODE == ABSOLUTE){ // zero absolute
         encoder.clearCount();
-        encoder.setCount(tmp-raw);
+        CounterMultiplier=0;
         drawBuzzer(BUZZER_OFF);
-      }else{
-        encoder.setCount(0);
+      }else{ // zero incremental
+        IncrementalOffset= -getMyCount(1);
+        drawBuzzer(BUZZER_STATE);
       }    
     }
   }
   if(digitalRead(INC_PIN)==LOW){
     if(debounce(INC_PIN)==1){
-        Absolute *= -1;
-        //Serial.println(Absolute);
-        AbsInc();
+        ABSINC_MODE *= -1;
+        //Serial.println(ABSINC_MODE);
+        drawAbsInc();
+        drawBuzzer(BUZZER_STATE);
     }
   }
   if(digitalRead(BUZZER_IN_PIN)==LOW){
@@ -213,18 +233,18 @@ void checkSwitches(){
       if(BUZZER_STATE != BUZZER_OFF){
         drawBuzzer(BUZZER_OFF);
       }else{
-        BUZZER_COUNT=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
+        BUZZER_COUNT=getMyCount(1); // get absolute count
         drawBuzzer(BUZZER_WAIT_FOR_RESET);
       }
     }
   }
 } 
 
-void AbsInc(){
+void drawAbsInc(){
   Tft->setTextSize(DRO_SCALE);
   Tft->fillRect(0,ROW[0], Tft->width(), DRO_H,ILI9341_BLACK);
   Tft->setTextColor(ILI9341_WHITE); Tft->setCursor(40,ROW[0]);
-  if(Absolute>0){
+  if(ABSINC_MODE == ABSOLUTE){
      Tft->print(" ABSOLUTE");
   }else{
     Tft->print("INCREMENTAL");
@@ -254,9 +274,13 @@ void drawBuzzer(int flag){
   BUZZER_STATE=flag;
   Tft->setTextSize(DRO_SCALE-1);
   Tft->fillRect(0,ROW[5], Tft->w, DRO_H,ILI9341_BLACK);
+  if(ABSINC_MODE == ABSOLUTE){
+    cXmm=SWAPX*40.0*(BUZZER_COUNT/(double)STEPS);
+  }else{
+    cXmm=SWAPX*40.0*((BUZZER_COUNT+IncrementalOffset)/(double)STEPS);
+  }
   
-   cXmm=SWAPX*40.0*(BUZZER_COUNT/(double)STEPS);
-   sprintf(tmp,"Buzz:%-5.4fmm",cXmm);
+  sprintf(tmp,"Buzz:%-5.4fmm",cXmm);
   switch(flag){
     case BUZZER_READY: // buzzer active
       Tft->setTextColor(ILI9341_GREEN);
@@ -277,7 +301,7 @@ void checkBuzzer(){
   int64_t currentCnt;
 
   if(BUZZER_STATE != BUZZER_OFF){
-    currentCnt=encoder.getCountRaw()+CounterOffset(CounterMultiplier);
+    currentCnt=getMyCount(1);
 
     // if current hits BUZZER_COUNT 
     if(BUZZER_STATE==BUZZER_READY){
@@ -372,26 +396,16 @@ void setup() {
   SetupKeyList->addButton(0,ROW[6]-1,159,ROW[6]+DRO_H+1,"Cancel",'C');
   SetupKeyList->addButton(159,ROW[6]-1,319,ROW[6]+DRO_H+1,"Apply",'A');
 
-  AbsInc();
   BUZZER_LIMIT=STEPS/3;  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle ratation.
   initDRODisplay(); 
 }
 
 void loop(){
   static unsigned long counter=0;
-  static int32_t prevCount=0;
-  int32_t raw=0;
-  if(millis()-counter >DRO_INTERVAL){
-    raw=encoder.getCountRaw();
-    // 30000 and 2000 are arbitrary, bracketing the rollover
-    if (prevCount >30000 && raw <=2000){ // counter (overflow) rolled  from 32766 to 0
-      CounterMultiplier += 1;
-    } else if(prevCount < -30000 && raw >= -2000){  // counter (overflow) rolled  from -32767 to 0
-      CounterMultiplier -=1;
-    }    
+
+  if(millis()-counter >DRO_INTERVAL){  
     displayDRO(0);
     counter=millis();
-    prevCount=raw;
   }
   checkSwitches();
   checkKeyboard();
