@@ -59,6 +59,31 @@ int64_t CounterOffset(int mult){
 }
 
 /*
+ * getMyCount
+ * Description: Reads encoder value, checks for overflow and returns result 
+ */
+int64_t getMyCount(int force=0){
+  int64_t result;
+  static int32_t prevCount=0;
+  int32_t raw=0;
+  
+  raw=encoder.getCountRaw();
+  // Because the encoder will roll over after +/- 32767, I need to keep track of how many times
+  // 30000 and 2000 are arbitrary, bracketing the rollover
+  if (prevCount >30000 && raw <=2000){ // counter (overflow) rolled  from 32766 to 0
+    CounterMultiplier += 1;
+  } else if(prevCount < -30000 && raw >= -2000){  // counter (overflow) rolled  from -32767 to 0
+    CounterMultiplier -=1;
+  }
+  prevCount=raw;  
+  result=raw+CounterOffset(CounterMultiplier);
+  if(force != 1 && ABSINC_MODE == INCREMENTAL){
+    result += IncrementalOffset;
+  }
+  return(result);
+}
+
+/*
  * initDRODisplay
  * initialize DRO 
  */
@@ -122,30 +147,12 @@ void displaySetup(){
       EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
       EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
       EEPROM.commit();
-      Serial.println("writing to EEPROM");
+      //Serial.println("writing to EEPROM");
     }
   }
 }
 
-int64_t getMyCount(int force=0){
-  int64_t result;
-  static int32_t prevCount=0;
-  int32_t raw=0;
-  
-  raw=encoder.getCountRaw();
-  // 30000 and 2000 are arbitrary, bracketing the rollover
-  if (prevCount >30000 && raw <=2000){ // counter (overflow) rolled  from 32766 to 0
-    CounterMultiplier += 1;
-  } else if(prevCount < -30000 && raw >= -2000){  // counter (overflow) rolled  from -32767 to 0
-    CounterMultiplier -=1;
-  }
-  prevCount=raw;  
-  result=raw+CounterOffset(CounterMultiplier);
-  if(force != 1 && ABSINC_MODE == INCREMENTAL){
-    result += IncrementalOffset;
-  }
-  return(result);
-}
+
 
 // Displays Coordinates
 void displayDRO(int resetDisplay){
@@ -185,6 +192,10 @@ void displayDRO(int resetDisplay){
   }
 }
 
+/*
+ * debounce
+ * Description: locks out button press for specified time, This eliminates switch bounce.
+ */
 int debounce(int pinNum){
   static unsigned long debounce[50]={0L};
   unsigned long debounceTime=0;
@@ -207,6 +218,10 @@ int debounce(int pinNum){
   return(result);
 }
 
+/*
+ * checkSwitches
+ * Description: checks all switches and preforms specified function if switch is pressed
+ */
 void checkSwitches(){
   if(digitalRead(ZERO_PIN)==LOW){
     if(debounce(ZERO_PIN)==1){
@@ -240,6 +255,10 @@ void checkSwitches(){
   }
 } 
 
+/*
+ * drawAbsInc
+ * Description: Draws appropriate text on screen for absolute or increment mode
+ */
 void drawAbsInc(){
   Tft->setTextSize(DRO_SCALE);
   Tft->fillRect(0,ROW[0], Tft->width(), DRO_H,ILI9341_BLACK);
@@ -251,6 +270,10 @@ void drawAbsInc(){
   } 
 }
 
+/*
+ * checkKeyboard
+ * Description: checks touch screen keylist. Currently the only key is for setup mode.
+ */
 String checkKeyboard(){
   char value;
   String result="";
@@ -267,6 +290,10 @@ String checkKeyboard(){
   return(result);
 }
 
+/*
+ * drawBuzzer
+ * Description: display buzzer status when buzzer is active, else it clears the buzzer text
+ */
 void drawBuzzer(int flag){
   double cXmm;
   char tmp[100];
@@ -295,7 +322,11 @@ void drawBuzzer(int flag){
   }    
 }
 
-// Buzzer is active LOW
+/*
+ * checkBuzzer
+ * Description:changes state of buzzer and sounds buzzer when needed
+ * Buzzer is active LOW (on when output is LOW)
+ */
 void checkBuzzer(){
   static int BuzzDirection=0;
   int64_t currentCnt;
@@ -343,7 +374,7 @@ void setup() {
   pinMode(BUZZER_OUT_PIN, OUTPUT);
   digitalWrite(BUZZER_OUT_PIN,HIGH); // turn off buzzer
   
-
+  // Allow different encoder pulse modes. Full is most accurate.
   switch(ENCODER_TYPE){
     case 'S':
       encoder.attachSingleEdge(A_PIN, B_PIN);
@@ -359,20 +390,22 @@ void setup() {
       STEPS=2400;
     break;
   }
-  // Need to define (redefine) encoder pins after attach, to redefine them as pullups not pulldowns
+  // Need to define (redefine) encoder pins after attach, to redefine them as pullups to take
+  // advantage of internal pullups
   pinMode(A_PIN, INPUT_PULLUP);
   pinMode(B_PIN, INPUT_PULLUP);
-  
+
+  // Use EEPROM to store SETUP parameters.
   EEPROM_DIR_ADDR=EEPROM_VALID_ADDR+sizeof(char);
   EEPROM_SCALE_ADDR=EEPROM_DIR_ADDR+sizeof(int);
   EEPROM_SIZE= sizeof(char)+sizeof(int)+sizeof(int);
   if(EEPROM.begin(EEPROM_SIZE)){
     if(EEPROM.readChar(EEPROM_VALID_ADDR) == ENCODER_TYPE){ //Valid data exists
-      Serial.println("reading from EEPROM");
+      //Serial.println("reading from EEPROM");
       SWAPX=EEPROM.readInt(EEPROM_DIR_ADDR);
       STEPS=EEPROM.readInt(EEPROM_SCALE_ADDR);
     }else{ // First time, so initalize
-      Serial.println("inital writing to EEPROM");
+      //Serial.println("inital writing to EEPROM");
       EEPROM.writeChar(EEPROM_VALID_ADDR,ENCODER_TYPE);
       EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
       EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
@@ -385,10 +418,12 @@ void setup() {
 
   Tft= new TFT_CLASS(SD_ENABLE,1); // Set  SD card=off/on  and initial rotation to 1
   //Tft->calibrate();
-  
+
+  // create touch key for main deisplay
   DroKeyList = new KEYLIST_CLASS(Tft);
   DroKeyList->addArea(0,ROW[6]-1,Tft->w,ROW[6]+DRO_H+1,'S');
 
+  // create touch keys for setup display
   SetupKeyList = new KEYLIST_CLASS(Tft);
   SetupKeyList->addButton(0,ROW[1]-1,80,ROW[1]+DRO_H+1,"Switch",'R');
   SetupKeyList->addButton(0,ROW[3]-1,80,ROW[3]+DRO_H+1,"-",'-');
@@ -396,7 +431,7 @@ void setup() {
   SetupKeyList->addButton(0,ROW[6]-1,159,ROW[6]+DRO_H+1,"Cancel",'C');
   SetupKeyList->addButton(159,ROW[6]-1,319,ROW[6]+DRO_H+1,"Apply",'A');
 
-  BUZZER_LIMIT=STEPS/3;  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle ratation.
+  BUZZER_LIMIT=STEPS/3;  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle rotation.
   initDRODisplay(); 
 }
 
