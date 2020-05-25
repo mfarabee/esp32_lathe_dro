@@ -37,11 +37,10 @@ Available: GPIO 2,0,16,17,21,3,1,22,12,32,39,36  (34-39 - input only, no pullup)
 
 TFT_CLASS *Tft;
 ESP32Encoder encoder;
+KEYLIST_CLASS *DroKeyList,*SetupKeyList;
 int CounterMultiplier=0;
 int64_t IncrementalOffset=0;
-KEYLIST_CLASS *DroKeyList,*SetupKeyList;
-int ABSINC_MODE=ABSOLUTE;
-
+int AbsIncMode=ABSOLUTE;
 
 // The encoder will rollover to zero and continue in positive or negative direction  
 // -> 0,1,32766,0,1,...    
@@ -77,7 +76,7 @@ int64_t getMyCount(int force=0){
   }
   prevCount=raw;  
   result=raw+CounterOffset(CounterMultiplier);
-  if(force != 1 && ABSINC_MODE == INCREMENTAL){
+  if(force != 1 && AbsIncMode == INCREMENTAL){
     result += IncrementalOffset;
   }
   return(result);
@@ -106,8 +105,8 @@ void displaySetup(){
   int swap;
   char value;
   
-  swap=SWAPX;
-  stepCnt=STEPS;
+  swap=SETUP.SWAPX;
+  stepCnt=SETUP.STEP_ADJUSTMENT;
   Tft->fillScreen(ILI9341_BLACK);
   SetupKeyList->drawKeys();
   
@@ -141,11 +140,11 @@ void displaySetup(){
     value=SetupKeyList->checkKeys();
   }
   if(value == 'A'){ // Apply settings and save to EEPROM
-    SWAPX=swap;
-    STEPS=stepCnt;
+    SETUP.SWAPX=swap;
+    SETUP.STEP_ADJUSTMENT=stepCnt;
+    STEPS=ENCODER_PULSE + SETUP.STEP_ADJUSTMENT;
     if(EEPROM_WORKING == 1){
-      EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
-      EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
+      EEPROM.writeBytes(EEPROM_START_ADDR,&SETUP,EEPROM_SIZE);
       EEPROM.commit();
       //Serial.println("writing to EEPROM");
     }
@@ -167,7 +166,7 @@ void displayDRO(int resetDisplay){
    */
 
    countX=getMyCount();
-   cXmm=SWAPX*40.0*(countX/(double)STEPS);
+   cXmm=SETUP.SWAPX*40.0*(countX/(double)STEPS);
    cXin=cXmm/25.4;
 
   Tft->setTextSize(DRO_SCALE);
@@ -225,7 +224,7 @@ int debounce(int pinNum){
 void checkSwitches(){
   if(digitalRead(ZERO_PIN)==LOW){
     if(debounce(ZERO_PIN)==1){
-      if(ABSINC_MODE == ABSOLUTE){ // zero absolute
+      if(AbsIncMode == ABSOLUTE){ // zero absolute
         encoder.clearCount();
         CounterMultiplier=0;
         drawBuzzer(BUZZER_OFF);
@@ -237,8 +236,8 @@ void checkSwitches(){
   }
   if(digitalRead(INC_PIN)==LOW){
     if(debounce(INC_PIN)==1){
-        ABSINC_MODE *= -1;
-        //Serial.println(ABSINC_MODE);
+        AbsIncMode *= -1;
+        //Serial.println(AbsIncMode);
         drawAbsInc();
         drawBuzzer(BUZZER_STATE);
     }
@@ -263,7 +262,7 @@ void drawAbsInc(){
   Tft->setTextSize(DRO_SCALE);
   Tft->fillRect(0,ROW[0], Tft->width(), DRO_H,ILI9341_BLACK);
   Tft->setTextColor(ILI9341_WHITE); Tft->setCursor(40,ROW[0]);
-  if(ABSINC_MODE == ABSOLUTE){
+  if(AbsIncMode == ABSOLUTE){
      Tft->print(" ABSOLUTE");
   }else{
     Tft->print("INCREMENTAL");
@@ -301,10 +300,10 @@ void drawBuzzer(int flag){
   BUZZER_STATE=flag;
   Tft->setTextSize(DRO_SCALE-1);
   Tft->fillRect(0,ROW[5], Tft->w, DRO_H,ILI9341_BLACK);
-  if(ABSINC_MODE == ABSOLUTE){
-    cXmm=SWAPX*40.0*(BUZZER_COUNT/(double)STEPS);
+  if(AbsIncMode == ABSOLUTE){
+    cXmm=SETUP.SWAPX*40.0*(BUZZER_COUNT/(double)STEPS);
   }else{
-    cXmm=SWAPX*40.0*((BUZZER_COUNT+IncrementalOffset)/(double)STEPS);
+    cXmm=SETUP.SWAPX*40.0*((BUZZER_COUNT+IncrementalOffset)/(double)STEPS);
   }
   
   sprintf(tmp,"Buzz:%-5.4fmm",cXmm);
@@ -357,13 +356,12 @@ void checkBuzzer(){
         BuzzDirection=1;
       }
     }   
-    
   }
 }
 
-
 void setup() {
   String result="";
+  SETUP_STRUCT tmp;
 
   Serial.begin(115200);
   ESP32Encoder::useInternalWeakPullResistors=false;
@@ -378,16 +376,16 @@ void setup() {
   switch(ENCODER_TYPE){
     case 'S':
       encoder.attachSingleEdge(A_PIN, B_PIN);
-      STEPS=600;
+      ENCODER_PULSE=600;
     break;
     case 'H':
       encoder.attachHalfQuad(A_PIN, B_PIN);
-      STEPS=1200;
+      ENCODER_PULSE=1200;
     break;
     case 'F':
     default:
       encoder.attachFullQuad(A_PIN, B_PIN);
-      STEPS=2400;
+      ENCODER_PULSE=2400;
     break;
   }
   // Need to define (redefine) encoder pins after attach, to redefine them as pullups to take
@@ -396,30 +394,27 @@ void setup() {
   pinMode(B_PIN, INPUT_PULLUP);
 
   // Use EEPROM to store SETUP parameters.
-  EEPROM_DIR_ADDR=EEPROM_VALID_ADDR+sizeof(char);
-  EEPROM_SCALE_ADDR=EEPROM_DIR_ADDR+sizeof(int);
-  EEPROM_SIZE= sizeof(char)+sizeof(int)+sizeof(int);
+  EEPROM_SIZE=sizeof(SETUP_STRUCT);
+  
   if(EEPROM.begin(EEPROM_SIZE)){
-    if(EEPROM.readChar(EEPROM_VALID_ADDR) == ENCODER_TYPE){ //Valid data exists
+    EEPROM.readBytes(EEPROM_START_ADDR,&tmp,EEPROM_SIZE);
+    if(tmp.REVISION == SETUP.REVISION){ // Valid data exists and struct had not changed
       //Serial.println("reading from EEPROM");
-      SWAPX=EEPROM.readInt(EEPROM_DIR_ADDR);
-      STEPS=EEPROM.readInt(EEPROM_SCALE_ADDR);
+      SETUP=tmp;
     }else{ // First time, so initalize
       //Serial.println("inital writing to EEPROM");
-      EEPROM.writeChar(EEPROM_VALID_ADDR,ENCODER_TYPE);
-      EEPROM.writeInt(EEPROM_DIR_ADDR,SWAPX);
-      EEPROM.writeInt(EEPROM_SCALE_ADDR,STEPS);
+      EEPROM.writeBytes(EEPROM_START_ADDR,&SETUP,EEPROM_SIZE);
       EEPROM.commit();     
     }
     EEPROM_WORKING=1;  
   }
-  
+  STEPS=ENCODER_PULSE + SETUP.STEP_ADJUSTMENT;
   encoder.clearCount();
 
   Tft= new TFT_CLASS(SD_ENABLE,1); // Set  SD card=off/on  and initial rotation to 1
   //Tft->calibrate();
 
-  // create touch key for main deisplay
+  // create touch key for main display
   DroKeyList = new KEYLIST_CLASS(Tft);
   DroKeyList->addArea(0,ROW[6]-1,Tft->w,ROW[6]+DRO_H+1,'S');
 
@@ -430,8 +425,9 @@ void setup() {
   SetupKeyList->addButton(240,ROW[3]-1,319,ROW[3]+DRO_H+1,"+",'+');
   SetupKeyList->addButton(0,ROW[6]-1,159,ROW[6]+DRO_H+1,"Cancel",'C');
   SetupKeyList->addButton(159,ROW[6]-1,319,ROW[6]+DRO_H+1,"Apply",'A');
-
-  BUZZER_LIMIT=STEPS/3;  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle rotation.
+  
+  // One rotation of encoder is ~40mm(1.57in). Want to reset buzzer after approx 12.7mm(0.5in) which is about 1 handle rotation.
+  BUZZER_LIMIT=STEPS/3;  
   initDRODisplay(); 
 }
 

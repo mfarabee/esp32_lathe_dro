@@ -9,8 +9,13 @@
 // Enable of SD card, enable=1, disable=0
 #define SD_ENABLE 0
 
+// ENCODER TYPE F=FULL(2400), H=HALF(1200), S=SINGLE(600)
+#define ENCODER_TYPE  'F'
+int ENCODER_PULSE=0;
+
 #define A_PIN 16  //GREEN
 #define B_PIN 17  // WHITE
+
 #define INC_PIN 21
 #define ZERO_PIN 22
 #define BUZZER_IN_PIN 2
@@ -30,18 +35,25 @@
 #define DRO_DIGITS 10
 #define DRO_STARTX 48
 
+
+#define EEPROM_START_ADDR 0
 int EEPROM_SIZE=0;
-int EEPROM_VALID_ADDR =0;
-int EEPROM_DIR_ADDR =1;
-int EEPROM_SCALE_ADDR=3;
 int EEPROM_WORKING =0;
 
-
 int ROW[]={1,35,69,103,137,171,205};
-int SWAPX = 1;
-int STEPS = 2400;
-// ENCODER TYPE F=FULL(2400), H=HALF(1200), S+SINGLE(600)
-char ENCODER_TYPE = 'F';
+
+//int SWAPX = 1;
+int STEPS = 0;
+//int STEP_ADJUSTMENT = 0;
+
+// change revision everytime struct is modified to force reload of eeprom
+typedef struct {
+    int REVISION=1;
+    int STEP_ADJUSTMENT=0;
+    int SWAPX=1;
+} SETUP_STRUCT;
+
+SETUP_STRUCT SETUP;
 
 #define BUZZER_TIME 500
 #define BUZZER_OFF 0
@@ -51,9 +63,7 @@ int64_t BUZZER_LIMIT= 800;
 int64_t BUZZER_COUNT=0;
 int     BUZZER_STATE=0;
 
-
 void displayDRO(int resetDisplay=0);
-
 
 
 #endif
